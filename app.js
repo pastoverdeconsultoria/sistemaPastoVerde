@@ -1,5 +1,6 @@
 // Manager Pro - Sistema de Gestão de Pastagem
-// Versão: 2.4.1
+// Versão: 2.5.0
+// Melhorias: Mouse drag, Scroll zoom, Lotes (não Grupos), GPS otimizado, Performance
 // Autor: Claude + Lucas Teixeira
 // Copyright: Pasto Verde Consultoria
 
@@ -58,6 +59,8 @@ function App() {
   const [data, setData] = useState({ faz: [], fa: null, mod: [], piq: [], lot: [], his: [], mb: null });
   const [ui, setUi] = useState({ tab: 'mapa', modal: null, sel: null, st: '', sch: '', ed: null, zm: 1, pn: { x: 0, y: 0 }, fd: {}, fe: [] });
   const [gps, setGps] = useState({ pos: null, status: 'buscando' });
+  const [drag, setDrag] = useState({ active: false, startX: 0, startY: 0, lastX: 0, lastY: 0 });
+  const svgRef = useRef(null);
 
   useEffect(() => {
     const s = localStorage.getItem('pastureSystem');
@@ -71,7 +74,7 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('pastureSystem', JSON.stringify({
-      version: '2.4.1',
+      version: '2.5.0',
       fazendas: data.faz,
       fazendaAtual: data.fa,
       modulos: data.mod,
@@ -95,13 +98,71 @@ function App() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  // Mouse drag handlers
+  const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    setDrag({ active: true, startX: e.clientX, startY: e.clientY, lastX: ui.pn.x, lastY: ui.pn.y });
+    if (svgRef.current) svgRef.current.style.cursor = 'grabbing';
+  }, [ui.pn]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!drag.active) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    setUi(u => ({ ...u, pn: { x: drag.lastX + dx, y: drag.lastY + dy } }));
+  }, [drag]);
+
+  const handleMouseUp = useCallback(() => {
+    setDrag(d => ({ ...d, active: false }));
+    if (svgRef.current) svgRef.current.style.cursor = 'grab';
+  }, []);
+
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setUi(u => ({ ...u, zm: Math.max(0.5, Math.min(5, u.zm + delta)) }));
+  }, []);
+
+  useEffect(() => {
+    if (drag.active) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [drag.active, handleMouseMove, handleMouseUp]);
+
+  // Touch handlers
+  const handleTouchStart = useCallback((e) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      setDrag({ active: true, startX: t.clientX, startY: t.clientY, lastX: ui.pn.x, lastY: ui.pn.y });
+    }
+  }, [ui.pn]);
+
+  const handleTouchMove = useCallback((e) => {
+    if (e.touches.length === 1 && drag.active) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - drag.startX;
+      const dy = t.clientY - drag.startY;
+      setUi(u => ({ ...u, pn: { x: drag.lastX + dx, y: drag.lastY + dy } }));
+    }
+  }, [drag]);
+
+  const handleTouchEnd = useCallback(() => {
+    setDrag(d => ({ ...d, active: false }));
+  }, []);
+
   const getPiqGPS = useMemo(() => {
     if (!gps.pos) return null;
     return data.piq.find(x => x.fazendaId === data.fa && x.coordinates && x.coordinates.length > 0 && pointInPolygon([gps.pos.lng, gps.pos.lat], x.coordinates)) || null;
   }, [gps.pos, data.piq, data.fa]);
 
   const exp = () => {
-    const d = { fazendas: data.faz, modulos: data.mod, piquetes: data.piq, lotes: data.lot, historico: data.his, version: '2.4.1' };
+    const d = { fazendas: data.faz, modulos: data.mod, piquetes: data.piq, lotes: data.lot, historico: data.his, version: '2.5.0' };
     const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
     const u = URL.createObjectURL(b);
     const a = document.createElement('a');
@@ -240,7 +301,7 @@ function App() {
     <div className="bg-gradient-to-r from-green-600 to-blue-600 text-white p-4 shadow-lg">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold">📊 Manager Pro v2.4</h1>
+          <h1 className="text-2xl font-bold">📊 Manager Pro v2.5</h1>
           <div className="flex gap-2">
             <button onClick={exp} className="bg-white/20 hover:bg-white/30 px-3 py-2 rounded text-sm flex items-center gap-1">
               <Download size={16} />Backup
@@ -251,10 +312,10 @@ function App() {
             </label>
           </div>
         </div>
-        {fazAt && <div className="text-sm flex items-center gap-2">
+        {fazAt && <div className="text-sm flex items-center gap-2 flex-wrap">
           <span>📍 {fazAt.nome}</span>
-          {gps.status === 'ativo' && getPiqGPS && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">✅ GPS | 📍 {getPiqGPS.nome}</span>}
-          {gps.status === 'ativo' && !getPiqGPS && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">✅ GPS</span>}
+          {gps.status === 'ativo' && getPiqGPS && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold">✅ GPS | 📍 {getPiqGPS.nome}</span>}
+          {gps.status === 'ativo' && !getPiqGPS && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">✅ GPS Ativo</span>}
         </div>}
       </div>
     </div>
@@ -280,8 +341,8 @@ function App() {
           </button>
         </div>
         {data.faz.length === 0 ? <div className="text-center py-8 text-gray-500">Nenhum local cadastrado</div> :
-          data.faz.map(f => <div key={f.id} className="border-2 rounded-lg p-4 mb-3 hover:border-green-500 transition">
-            <h3 className="text-lg font-bold cursor-pointer hover:text-green-600" onClick={() => { setData({ ...data, fa: f.id }); setUi({ ...ui, tab: 'mapa' }); }}>{f.nome}</h3>
+          data.faz.map(f => <div key={f.id} className="border-2 rounded-lg p-4 mb-3 hover:border-green-500 transition cursor-pointer" onClick={() => { setData({ ...data, fa: f.id }); setUi({ ...ui, tab: 'mapa' }); }}>
+            <h3 className="text-lg font-bold text-green-600 hover:text-green-700">{f.nome}</h3>
             {f.areaTotal > 0 && <div className="text-sm text-gray-600 mt-2">
               <div>📊 Total: {f.areaTotal}ha | 🌾 Útil: {f.areaUtil}ha</div>
               <div>🌳 Preservação: {f.areaPreservacao}ha</div>
@@ -290,7 +351,7 @@ function App() {
       </div> :
 
         ui.tab === 'mapa' ? <div className="bg-white rounded-lg shadow p-4">
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
             <h2 className="text-xl font-bold">Mapa</h2>
             <label className="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 cursor-pointer text-sm flex items-center gap-1">
               <Upload size={16} />Importar KML
@@ -299,26 +360,41 @@ function App() {
           </div>
           {piqF.length === 0 ? <div className="text-center py-12 text-gray-500">
             <MapPin size={48} className="mx-auto mb-2 text-gray-300" />
-            <p>Importe um arquivo KML para começar</p>
+            <p className="font-semibold mb-1">Importe um arquivo KML</p>
+            <p className="text-sm">As áreas serão calculadas automaticamente</p>
           </div> : <div>
-            <div className="flex gap-2 mb-2">
+            <div className="flex gap-2 mb-2 flex-wrap items-center">
               <button onClick={() => setUi({ ...ui, zm: Math.min(ui.zm + 0.2, 5) })} className="bg-gray-200 p-2 rounded hover:bg-gray-300"><ZoomIn size={18} /></button>
               <button onClick={() => setUi({ ...ui, zm: Math.max(ui.zm - 0.2, 0.5) })} className="bg-gray-200 p-2 rounded hover:bg-gray-300"><ZoomOut size={18} /></button>
               <button onClick={() => setUi({ ...ui, zm: 1, pn: { x: 0, y: 0 } })} className="bg-gray-200 p-2 rounded hover:bg-gray-300"><RotateCcw size={18} /></button>
+              <div className="text-xs text-gray-600 ml-auto">🖱️ Arraste | 🔍 Scroll = Zoom | Zoom: {(ui.zm * 100).toFixed(0)}%</div>
             </div>
-            <div className="border-2 rounded bg-gray-50 overflow-hidden">
+            <div 
+              ref={svgRef}
+              className="border-2 rounded bg-gray-50 overflow-hidden select-none"
+              style={{ cursor: drag.active ? 'grabbing' : 'grab' }}
+              onMouseDown={handleMouseDown}
+              onWheel={handleWheel}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
               <svg viewBox="0 0 1000 800" className="w-full h-auto" style={{ minHeight: '400px' }}>
                 <g transform={`translate(${ui.pn.x},${ui.pn.y}) scale(${ui.zm})`}>
                   {piqF.filter(p => p.coordinates && p.coordinates.length > 0).map(p => {
                     const path = getPath(p.coordinates, data.mb, 1000, 800);
                     const [cx, cy] = projC(getCent(p.coordinates)[0], getCent(p.coordinates)[1], data.mb, 1000, 800);
                     return <g key={p.id}>
-                      <path d={path} fill={p.ehReserva ? 'rgba(22,101,52,0.7)' : '#e2e8f0'} stroke={p.ehReserva ? '#166534' : '#94a3b8'} strokeWidth={p.ehReserva ? 3 : 2} opacity="0.95" className={p.ehReserva ? "" : "cursor-pointer hover:opacity-100"} onClick={() => !p.ehReserva && setUi({ ...ui, sel: p })} />
+                      <path d={path} fill={p.ehReserva ? 'rgba(22,101,52,0.7)' : '#e2e8f0'} stroke={p.ehReserva ? '#166534' : '#94a3b8'} strokeWidth={p.ehReserva ? 3 : 2} opacity="0.95" className={p.ehReserva ? "" : "cursor-pointer hover:opacity-100"} onClick={(e) => { if (!p.ehReserva) { e.stopPropagation(); setUi({ ...ui, sel: p }); } }} />
                       <text x={cx} y={cy - 20} textAnchor="middle" fill="#1e293b" fontSize="20" fontWeight="bold" className="pointer-events-none">{p.ehReserva ? '🌳 ' : ''}{p.nome}</text>
                       <text x={cx} y={cy} textAnchor="middle" fill="#64748b" fontSize="16" className="pointer-events-none">{p.area}ha</text>
+                      {p.ehReserva && <text x={cx} y={cy + 20} textAnchor="middle" fill="#166534" fontSize="14" fontWeight="600" className="pointer-events-none">RESERVA</text>}
                     </g>;
                   })}
-                  {gps.pos && data.mb && <circle cx={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[0]} cy={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[1]} r="6" fill="#3b82f6" />}
+                  {gps.pos && data.mb && <g>
+                    <circle cx={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[0]} cy={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[1]} r="12" fill="#3b82f6" opacity="0.2" className="gps-pulse" />
+                    <circle cx={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[0]} cy={projC(gps.pos.lng, gps.pos.lat, data.mb, 1000, 800)[1]} r="6" fill="#3b82f6" />
+                  </g>}
                 </g>
               </svg>
             </div>
@@ -327,7 +403,18 @@ function App() {
 
           ui.tab === 'piquetes' ? <div className="bg-white rounded-lg shadow p-4">
             <h2 className="text-xl font-bold mb-3">Áreas (Piquetes)</h2>
-            <p className="text-gray-600">{piqF.length} áreas cadastradas</p>
+            {piqF.length === 0 ? <div className="text-center py-8 text-gray-500">Nenhuma área cadastrada</div> :
+              <div className="space-y-2">
+                <div className="text-sm text-gray-600 mb-3">{piqF.length} área(s) | Total: {piqF.reduce((s, p) => s + parseFloat(p.area || 0), 0).toFixed(2)}ha</div>
+                {piqF.map(p => <div key={p.id} className={`border-2 rounded-lg p-3 ${p.ehReserva ? 'bg-green-50 border-green-300' : 'border-gray-200'}`}>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold">{p.ehReserva && '🌳 '}{p.nome}</h3>
+                      <p className="text-sm text-gray-600">{p.area}ha{p.ehReserva && <span className="ml-2 text-xs bg-green-700 text-white px-2 py-0.5 rounded font-semibold">RESERVA</span>}</p>
+                    </div>
+                  </div>
+                </div>)}
+              </div>}
           </div> :
 
             ui.tab === 'modulos' ? <div className="bg-white rounded-lg shadow p-4">
@@ -337,7 +424,8 @@ function App() {
                   <Plus size={16} />Novo
                 </button>
               </div>
-              <p className="text-gray-600">{modF.length} módulos cadastrados</p>
+              {modF.length === 0 ? <div className="text-center py-8 text-gray-500">Nenhum módulo cadastrado</div> :
+                <div className="text-gray-600">{modF.length} módulo(s) cadastrado(s)</div>}
             </div> :
 
               ui.tab === 'lotes' ? <div className="bg-white rounded-lg shadow p-4">
@@ -348,52 +436,78 @@ function App() {
                   </button>
                 </div>
                 {lotF.filter(l => l.status !== 'vendido').length === 0 ? <div className="text-center py-8 text-gray-500">Nenhum lote ativo</div> :
-                  lotF.filter(l => l.status !== 'vendido').map(l => <div key={l.id} className="border-2 rounded-lg p-4 mb-3">
-                    <div className="flex items-center gap-2 mb-1">
+                  lotF.filter(l => l.status !== 'vendido').map(l => <div key={l.id} className="border-2 rounded-lg p-4 mb-3 hover:border-green-500 transition">
+                    <div className="flex items-center gap-2 mb-2">
                       <span style={{ color: getLoteCor(lotF.findIndex(x => x.id === l.id)) }} className="text-2xl">●</span>
-                      <h3 className="font-bold">{l.nome}</h3>
+                      <h3 className="font-bold text-lg">{l.nome}</h3>
                     </div>
-                    <p className="text-sm text-gray-600">{l.categoria} • {l.quantidade} cab • {l.totalUA} UA</p>
-                    {l.status === 'livre' ? <span className="inline-block bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold mt-2">🟡 Livre</span> :
-                      <span className="inline-block bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold mt-2">✅ Alocado</span>}
+                    <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                      <div><b>Categoria:</b> {l.categoria}</div>
+                      <div><b>Quantidade:</b> {l.quantidade} cab</div>
+                      <div><b>Peso médio:</b> {l.pesoMedio}kg</div>
+                      <div><b>Total UA:</b> {l.totalUA}</div>
+                    </div>
+                    <div className="mt-2">
+                      {l.status === 'livre' ? <span className="inline-block bg-yellow-100 text-yellow-800 px-3 py-1 rounded text-sm font-semibold">🟡 Livre</span> :
+                        <span className="inline-block bg-green-100 text-green-800 px-3 py-1 rounded text-sm font-semibold">✅ Alocado</span>}
+                    </div>
                   </div>)}
               </div> :
 
                 <div className="bg-white rounded-lg shadow p-4">
-                  <h2 className="text-xl font-bold">Histórico</h2>
-                  <p className="text-gray-500 mt-4">Movimentações serão exibidas aqui</p>
+                  <h2 className="text-xl font-bold mb-3">Histórico</h2>
+                  {data.his.filter(h => h.fazendaId === data.fa).length === 0 ?
+                    <div className="text-center py-8 text-gray-500">Nenhuma movimentação registrada</div> :
+                    <div className="text-gray-600">{data.his.filter(h => h.fazendaId === data.fa).length} movimentação(ões)</div>}
                 </div>}
     </div>
 
     {ui.modal === 'fazenda' && <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-4 max-w-md w-full">
-        <h2 className="text-lg font-bold mb-3">Novo Local</h2>
-        <input type="text" placeholder="Nome *" value={ui.fd.nome || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, nome: e.target.value } })} className="w-full px-3 py-2 border rounded mb-3" />
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold">Novo Local</h2>
+          <button onClick={() => setUi({ ...ui, modal: null, fd: {} })} className="text-gray-500 hover:text-gray-700">
+            <X size={20} />
+          </button>
+        </div>
+        <input type="text" placeholder="Nome do local *" value={ui.fd.nome || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, nome: e.target.value } })} className="w-full px-3 py-2 border rounded mb-3" />
         <div className="flex gap-2">
           <button onClick={() => {
             if (!ui.fd.nome) return;
-            const nv = { id: gid(), nome: ui.fd.nome, areaTotal: 0, areaPreservacao: 0, areaUtil: 0 };
+            const nv = { id: gid(), nome: ui.fd.nome, areaTotal: 0, areaPreservacao: 0, areaUtil: 0, dataCriacao: new Date().toISOString() };
             setData({ ...data, faz: [...data.faz, nv], fa: nv.id });
             setUi({ ...ui, modal: null, fd: {}, tab: 'mapa' });
-          }} className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Criar</button>
+          }} className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-semibold">Criar</button>
           <button onClick={() => setUi({ ...ui, modal: null, fd: {} })} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Cancelar</button>
         </div>
       </div>
     </div>}
 
     {ui.modal === 'lote' && <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-4 max-w-md w-full">
-        <h2 className="text-lg font-bold mb-3">Novo Lote</h2>
-        <input type="text" placeholder="Nome *" value={ui.fd.nome || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, nome: e.target.value } })} className="w-full px-3 py-2 border rounded mb-2" />
+      <div className="bg-white rounded-lg p-4 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold">Novo Lote</h2>
+          <button onClick={() => setUi({ ...ui, modal: null, fd: {} })} className="text-gray-500 hover:text-gray-700">
+            <X size={20} />
+          </button>
+        </div>
+        <input type="text" placeholder="Nome do lote *" value={ui.fd.nome || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, nome: e.target.value } })} className="w-full px-3 py-2 border rounded mb-2" />
         <select value={ui.fd.categoria || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, categoria: e.target.value } })} className="w-full px-3 py-2 border rounded mb-2">
-          <option value="">Categoria...</option>
-          {['Bezerro', 'Bezerra', 'Garrotes', 'Novilhas', 'Bois', 'Vacas'].map(c => <option key={c}>{c}</option>)}
+          <option value="">Selecione a categoria...</option>
+          {['Bezerro', 'Bezerra', 'Garrotes', 'Novilhas', 'Bois', 'Vacas'].map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <input type="number" placeholder="Peso (kg)" value={ui.fd.peso || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, peso: e.target.value } })} className="w-full px-3 py-2 border rounded mb-2" />
-        <input type="number" placeholder="Quantidade" value={ui.fd.qtd || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, qtd: e.target.value } })} className="w-full px-3 py-2 border rounded mb-3" />
+        <input type="number" step="0.01" placeholder="Peso médio (kg) *" value={ui.fd.peso || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, peso: e.target.value } })} className="w-full px-3 py-2 border rounded mb-2" />
+        <input type="number" placeholder="Quantidade de animais *" value={ui.fd.qtd || ''} onChange={e => setUi({ ...ui, fd: { ...ui.fd, qtd: e.target.value } })} className="w-full px-3 py-2 border rounded mb-3" />
+        {ui.fd.peso && ui.fd.qtd && <div className="bg-blue-50 border border-blue-200 rounded p-2 mb-3 text-sm">
+          <b>Total UA:</b> {calcUA(parseFloat(ui.fd.peso), parseInt(ui.fd.qtd))}
+        </div>}
         <div className="flex gap-2">
           <button onClick={() => {
-            if (!ui.fd.nome || !ui.fd.categoria || !ui.fd.peso || !ui.fd.qtd) return;
+            if (!ui.fd.nome || !ui.fd.categoria || !ui.fd.peso || !ui.fd.qtd) {
+              setUi({ ...ui, st: '❌ Preencha todos os campos!' });
+              setTimeout(() => setUi(u => ({ ...u, st: '' })), 3000);
+              return;
+            }
             const tu = calcUA(parseFloat(ui.fd.peso), parseInt(ui.fd.qtd));
             const nv = {
               id: gid(),
@@ -404,11 +518,13 @@ function App() {
               quantidade: parseInt(ui.fd.qtd),
               totalUA: parseFloat(tu),
               status: 'livre',
-              piqueteAtual: null
+              piqueteAtual: null,
+              dataCriacao: new Date().toISOString()
             };
             setData({ ...data, lot: [...data.lot, nv] });
-            setUi({ ...ui, modal: null, fd: {} });
-          }} className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Criar</button>
+            setUi({ ...ui, modal: null, fd: {}, st: '✅ Lote criado!' });
+            setTimeout(() => setUi(u => ({ ...u, st: '' })), 3000);
+          }} className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-semibold">Criar Lote</button>
           <button onClick={() => setUi({ ...ui, modal: null, fd: {} })} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Cancelar</button>
         </div>
       </div>
